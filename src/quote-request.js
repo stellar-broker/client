@@ -26,8 +26,7 @@ export function validateQuoteRequest(params) {
         buyingAsset: parseAsset(buyingAsset || buying_asset, 'buyingAsset'),
         sellingAmount: parseAmount(sellingAmount || selling_amount, 'sellingAmount'),
         buyingAmount: parseAmount(buyingAmount || buying_amount, 'buyingAmount'),
-        slippageTolerance: parseSlippageTolerance(slippageTolerance || slippage_tolerance || 0.02, 'slippageTolerance'),
-        flow: 'direct'
+        slippageTolerance: parseSlippageTolerance(slippageTolerance || slippage_tolerance || 0.02, 'slippageTolerance')
     }
     if (res.buyingAsset === res.sellingAsset)
         throw errors.invalidQuoteParam('buyingAsset', 'Buying asset can\'t be the same as selling asset')

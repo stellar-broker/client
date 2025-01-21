@@ -107,10 +107,6 @@ export interface ClientInitializationParams {
      */
     partnerKey?: string;
     /**
-     * Swap flow mode
-     */
-    flow?: SwapFlowMode;
-    /**
      * Stellar network identifier or passphrase (pubnet by default)
      */
     network?: string;
@@ -119,8 +115,6 @@ export interface ClientInitializationParams {
 export type ClientStatus = "disconnected" | "ready" | "quote" | "trade";
 
 export type StellarBrokerClientEvent = "quote" | "finished" | "progress" | "error";
-
-export type SwapFlowMode = "direct";
 
 export interface SwapQuoteResult {
     sellingAsset: string;

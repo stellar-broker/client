@@ -46,6 +46,8 @@ const errors = {
     unsupportedEventType(type) {
         return new StellarBrokerError(31, 'Unknown event type: ' + type)
     },
+
+
     serverError(message) {
         return new StellarBrokerError(101, message)
     }

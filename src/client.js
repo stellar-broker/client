@@ -3,6 +3,7 @@ import errors from './errors.js'
 import {buildEvent} from './events.js'
 import {validateQuoteRequest} from './quote-request.js'
 import {processTxRequest} from './tx-processor.js'
+import {AuthorizationWrapper} from './authorization.js'
 
 export default class StellarBrokerClient {
     /**
@@ -11,20 +12,11 @@ export default class StellarBrokerClient {
     constructor(params) {
         this.partnerKey = params.partnerKey
         this.emitter = new EventTarget()
-        this.network = Networks[(params.network || 'PUBLIC').toUpperCase()] || params.network
-        this.flow = params.flow || 'direct'
+        this.network = Networks.PUBLIC
         if (!params.account || !StrKey.isValidEd25519PublicKey(params.account))
             throw errors.invalidQuoteParam('account', 'Invalid trader account address: ' + (!params.account ? 'missing' : params.account))
         this.trader = params.account
-        if (typeof params.authorization === 'string') {
-            try {
-                this.authorization = Keypair.fromSecret(params.authorization)
-            } catch (e) {
-                throw errors.invalidAuthorizationParam()
-            }
-        } else if (typeof params.authorization === 'function') {
-            this.authorization = params.authorization
-        }
+        this.authorization = new AuthorizationWrapper(params.authorization)
     }
 
     /**
@@ -82,8 +74,8 @@ export default class StellarBrokerClient {
      */
     partnerKey
     /**
-     * Account secret key (for direct swap flow)
-     * @type {Keypair|ClientAuthorizationCallback}
+     * Account secret key or authorization callback
+     * @type {AuthorizationWrapper}
      * @private
      */
     authorization
@@ -331,11 +323,9 @@ export const StellarBrokerEvents = ['quote', 'paused', 'progress', 'finished', '
 
 /**
  * @typedef {object} ClientInitializationParams
- * @property {string} [network] - Stellar network identifier or passphrase
- * @property {string} [partnerKey] - Partner key
- * @property {SwapFlowMode} [flow] - Swap flow mode
  * @property {string} account - Trader account address
- * @property {string|ClientAuthorizationCallback} authorization - Authorization method, either account secret key or an authorization callback
+ * @property {ClientAuthorizationParams} authorization - Authorization method, either account secret key or an authorization callback
+ * @property {string} [partnerKey] - Partner key
  */
 
 /**
@@ -344,10 +334,6 @@ export const StellarBrokerEvents = ['quote', 'paused', 'progress', 'finished', '
 
 /**
  * @typedef {'quote'|'paused'|'progress'|'finished'|'error'} StellarBrokerClientEvent
- */
-
-/**
- * @typedef {'direct'} SwapFlowMode
  */
 
 /**
@@ -362,8 +348,4 @@ export const StellarBrokerEvents = ['quote', 'paused', 'progress', 'finished', '
  * @property {string} [buyingAmount]
  * @property {string} [estimatedSellingAmount]
  * @property {{selling: string, buying: string, path: string[]}} [directTrade]
- */
-
-/**
- * @typedef {function(TransactionI|Buffer):Promise<TransactionI|Buffer>} ClientAuthorizationCallback
  */

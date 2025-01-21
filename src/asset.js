@@ -2,12 +2,16 @@ import {Asset, StrKey} from '@stellar/stellar-sdk'
 import errors from './errors.js'
 
 /**
- * @param {string} asset
+ * @param {string|Asset|{}} asset
  * @return {Asset}
  */
 export function convertToStellarAsset(asset) {
-    if (asset === 'xlm' || asset === 'XLM')
+    if (asset instanceof Asset)
+        return asset
+    if (asset === 'xlm' || asset === 'XLM' || asset.asset_type === 'native')
         return Asset.native()
+    if (asset.asset_type)
+        return new Asset(asset.asset_code, asset.asset_issuer)
     const [code, issuer] = asset.includes('-') ?
         asset.split('-') :
         asset.split(':')

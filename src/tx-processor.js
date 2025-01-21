@@ -62,12 +62,7 @@ async function authorizeInvocation(client, tx) {
         })
     )
     const payload = hash(preimage.toXDR())
-    let signature
-    if (client.authorization instanceof Keypair) {
-        signature = client.authorization.sign(payload)
-    } else {
-        signature = await promisify(client.authorization(payload))
-    }
+    const signature = await client.authorization.authorize(payload)
     const publicKey = StrKey.encodeEd25519PublicKey(addrAuth.address().accountId().value())
     const sigScVal = nativeToScVal(
         {
@@ -91,22 +86,8 @@ async function authorizeInvocation(client, tx) {
  * @return {Promise<TransactionI>}
  * @private
  */
-async function signTx(client, tx) {
-    let promise
-    if (client.authorization instanceof Keypair) {
-        promise = new Promise((resolve, reject) => {
-            try {
-                tx.sign(client.authorization)
-                resolve(tx)
-            } catch (e) {
-                reject(e)
-            }
-        })
-    } else {
-        //normalize external auth result
-        promise = promisify(client.authorization(tx))
-    }
-    return promise
+function signTx(client, tx) {
+    return client.authorization.authorize(tx)
         .then(tx => {
             if (typeof tx === 'string') { //normalize response
                 tx = TransactionBuilder.fromXDR(tx, client.network)
@@ -150,13 +131,4 @@ function validateTransaction(client, tx) {
     }
     //TODO: check assets and amounts
     return true
-}
-
-function promisify(callResult) {
-    if (!(callResult instanceof Promise)) {
-        if (!callResult)
-            return Promise.reject()
-        callResult = Promise.resolve(callResult)
-    }
-    return callResult
 }
