@@ -1,7 +1,10 @@
 import {Asset, Keypair, Memo, Operation, TransactionBuilder, Horizon, Networks, StrKey} from '@stellar/stellar-sdk'
 import {fromStroops, toStroops} from './stroops.js'
 import {convertToStellarAsset} from './asset.js'
-import {processAuthorization} from './authorization.js'
+import {AuthorizationWrapper} from './authorization.js'
+
+//additional XLM amount to cover tx fees
+const feesReserve = '2'
 
 class Mediator {
     /**
@@ -9,7 +12,7 @@ class Mediator {
      * @param {string} source - Creator account address
      * @param {string|Asset} sellingAsset - Asset identifier to sell
      * @param {string} sellingAmount - Asset amount to sell
-     * @param {Keypair|ClientAuthorizationCallback} authorization - Authorization
+     * @param {string|ClientAuthorizationCallback} authorization - Authorization
      */
     constructor(source, sellingAsset, sellingAmount, authorization) {
         if (!StrKey.isValidEd25519PublicKey(source))
@@ -27,7 +30,7 @@ class Mediator {
             console.error(e)
             throw new Error('Invalid selling amount')
         }
-        this.authorization = processAuthorization(authorization)
+        this.authorization = new AuthorizationWrapper(authorization)
     }
 
     /**
@@ -57,7 +60,7 @@ class Mediator {
      */
     sellingAmount
     /**
-     * @type {Keypair|ClientAuthorizationCallback}
+     * @type {AuthorizationWrapper}
      * @private
      */
     authorization
@@ -78,49 +81,53 @@ class Mediator {
         const sourceAccount = await loadAccount(this.source)
         if (!sourceAccount)
             throw new Error('Mediator account doesn\'t exist on the ledger')
-        const builder = createTxBuilder(sourceAccount)
-        builder.addMemo(Memo.text('StellarBroker mediator acc'))
+        const ops = []
         //create new random keypair for the trade
         this.mediator = Keypair.random()
         this.mediatorAddress = this.mediator.publicKey()
-        const {asset} = this
-        builder.addOperation(Operation.beginSponsoringFutureReserves({
+        //source account sponsors reserves for the mediator
+        ops.push(Operation.beginSponsoringFutureReserves({
             sponsoredId: this.mediatorAddress
         }))
-        if (asset.isNative()) {
+        const {asset} = this
+        if (asset.isNative()) { //for XLM total amount should include fee reserves
             const amount = this.sellingAmount + feesReserve * 10000000
+            //check available balance
             if (toStroops(findTrustline(sourceAccount, asset).balance) < amount)
                 throw new Error('Insufficient XLM balance for selling amount + potential trading fees')
-            builder.addOperation(Operation.createAccount({
+            //only create account is required for asset transfer
+            ops.push(Operation.createAccount({
                 destination: this.mediatorAddress,
                 startingBalance: fromStroops(amount)
             }))
         } else {
+            //check available XLM balance
             if (findTrustline(sourceAccount, Asset.native()).balance < feesReserve)
                 throw new Error('Insufficient XLM balance for potential trading fees')
-            builder.addOperation(Operation.createAccount({
+            //create mediator account
+            ops.push(Operation.createAccount({
                 destination: this.mediatorAddress,
                 startingBalance: feesReserve // for tx fees
             }))
+            //check available XLM balance
             const sellingTrustline = findTrustline(sourceAccount, asset)
             if (!sellingTrustline || toStroops(sellingTrustline.balance) < sellingAmount)
                 throw new Error('Insufficient selling asset balance')
-            builder.addOperation(Operation.changeTrust({
+            //create trustline for selling asset
+            ops.push(Operation.changeTrust({
                 source: this.mediatorAddress,
                 asset
             }))
-            builder.addOperation(Operation.payment({
+            //transfer tokens to sell
+            ops.push(Operation.payment({
                 asset,
                 destination: this.mediatorAddress,
                 amount: fromStroops(this.sellingAmount)
             }))
         }
-        builder.addOperation(Operation.endSponsoringFutureReserves({}))
-        const tx = builder.build()
-        tx.sign(this.mediator)
-        //request init transaction signature from the client
-        await session.authorizeMediator(this.mediatorAddress, tx.toXDR())
-        await submit()
+        ops.push(Operation.endSponsoringFutureReserves({}))
+        await this.buildAndSend(sourceAccount, ops, 'StellarBroker mediator acc')
+        //the account is ready to trade
         this.isReady = true
     }
 
@@ -129,65 +136,82 @@ class Mediator {
      * @param {string} mergeDestination
      */
     async dispose(accountAddress, mergeDestination) {
+        //load account
         const account = await loadAccount(accountAddress)
         if (!account)
             throw new Error('Mediator account doesn\'t exist on the ledger')
-        const builder = createTxBuilder(accountAddress)
-
+        const ops = []
+        //remove trustlines for each account balance
         for (const balance of account.balances) {
             if (balance.asset_type === 'native')
-                continue
+                continue //skip XLM trustline - merge will handle the transfer
             const asset = convertToStellarAsset(balance)
-            if (balance.balance > 0) { // if src balance left
-                builder.addOperation(Operation.payment({
+            //transfer remaining balance to the source account
+            if (balance.balance > 0) {
+                ops.push(Operation.payment({
                     asset,
-                    destination: this.source,
+                    destination: mergeDestination,
                     amount: balance.balance
                 }))
             }
-            builder.addOperation(Operation.changeTrust({
+            //remove trustline
+            ops.push(Operation.changeTrust({
                 asset,
                 limit: '0'
             }))
         }
-
-        builder.addOperation(Operation.accountMerge({
+        //merge
+        ops.push(Operation.accountMerge({
             destination: mergeDestination
         }))
+        await this.buildAndSend(account, ops)
+        //disposed
+        this.isReady = false
+    }
+
+    /**
+     * @param {AccountResponse} account
+     * @param {Operation[]} operations
+     * @param {string} [memo]
+     * @private
+     */
+    async buildAndSend(account, operations, memo) {
+        //create builder
+        const builder = new TransactionBuilder(account, {
+            fee: '1000000',
+            networkPassphrase: Networks.PUBLIC
+        })
+        builder.setTimeout(30)
+        //add memo if needed
+        if (memo) {
+            builder.addMemo(Memo.text(memo))
+        }
+        //add operations
+        for (const op of operations) {
+            builder.addOperation(op)
+        }
+        //build tx and sign it on behalf of the mediator account
+        let tx = builder.build()
+        tx.sign(this.mediator)
+        //request init transaction signature from the client
+        tx = this.authorization.authorize(tx)
+        //execute the tx
+        const horizon = createHorizon()
+        const res = await horizon.submitTransaction(tx, {skipMemoRequiredCheck: true})
+        if (!res.successful)
+            throw new Error('Failed to create mediator account')
     }
 }
 
-//additional XLM amount to cover tx fees
-const feesReserve = '2'
-
-function createTxBuilder(account) {
-    const builder = new TransactionBuilder(account, {
-        fee: '1000000',
-        networkPassphrase: Networks.PUBLIC
-    })
-    return builder
-}
-
+/**
+ * @param {string} address
+ * @return {Promise<AccountResponse>}
+ */
 async function loadAccount(address) {
     try {
         return createHorizon().loadAccount(address)
     } catch (e) {
         console.error(e)
-    }
-}
-
-/**
- * @param {AccountResponse} account
- * @param {Asset} sellingAsset
- * @param {string} sellingAmount
- * @return {BalanceLine}
- */
-function verifySourceAccount(account, sellingAsset, sellingAmount) {
-
-
-    const sellingAssetBalance = findTrustline(account, this.sellingAsset)
-    if (sellingAssetBalance) {
-
     }
 }
 
@@ -205,13 +229,6 @@ function findTrustline(account, asset) {
 
 function createHorizon() {
     return new Horizon.Server('https://horizon.stellar.org')
-}
-
-async function submit(tx) {
-    const horizon = createHorizon()
-    const res = await horizon.submitTransaction(tx, {skipMemoRequiredCheck: true})
-    if (!res.successful)
-        throw new Error('Failed to create mediator account')
 }
 
 module.exports = Mediator
