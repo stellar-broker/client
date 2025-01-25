@@ -9,11 +9,13 @@ export class AuthorizationWrapper {
         if (typeof authorization === 'string') {
             try {
                 this.authorization = Keypair.fromSecret(authorization)
+                return
             } catch (e) {
                 throw errors.invalidAuthorizationParam()
             }
         } else if (typeof authorization === 'function') {
-            this.authorizationauthorization = authorization
+            this.authorization = authorization
+            return
         }
         throw errors.invalidAuthorizationParam()
     }
@@ -31,6 +33,10 @@ export class AuthorizationWrapper {
      */
     async authorize(payload) {
         if (this.authorization instanceof Keypair) {
+            if (payload.sign){
+                payload.sign(this.authorization)
+                return payload
+            }
             return this.authorization.sign(payload)
         }
         return await promisify(this.authorization(payload))

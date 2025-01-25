@@ -1,4 +1,4 @@
-import {Networks, Keypair, TransactionI, StrKey} from '@stellar/stellar-sdk'
+import {Networks, StrKey} from '@stellar/stellar-sdk'
 import errors from './errors.js'
 import {buildEvent} from './events.js'
 import {validateQuoteRequest} from './quote-request.js'
