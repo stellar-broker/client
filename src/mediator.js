@@ -5,7 +5,6 @@ import {AuthorizationWrapper} from './authorization.js'
 
 //additional XLM amount to cover tx fees
 const feesReserve = '2'
-const storagePrefix = 'msb_'
 
 export class Mediator {
     /**
@@ -77,6 +76,11 @@ export class Mediator {
      * @readonly
      */
     mediatorAddress
+    /**
+     * Prefix of the mediator address record in the localStorage
+     * @type {string}
+     */
+    storagePrefix = 'msb_'
 
     /**
      * Check if there are any non-disposed mediators that belong to lost swap sessions
@@ -84,7 +88,7 @@ export class Mediator {
      */
     get hasObsoleteMediators() {
         return Object.entries(localStorage).some(([key, initiator]) =>
-            initiator === this.source && key.startsWith(storagePrefix))
+            initiator === this.source && key.startsWith(this.storagePrefix))
     }
 
     /**
@@ -93,8 +97,8 @@ export class Mediator {
      */
     async disposeObsoleteMediators() { //TODO: deal with potential problems caused by concurrent swaps
         for (let [key, initiator] of Object.entries(localStorage)) {
-            if (initiator === this.source && key.startsWith(storagePrefix)) {
-                await this.dispose(key.replace(storagePrefix, ''))
+            if (initiator === this.source && key.startsWith(this.storagePrefix)) {
+                await this.dispose(key.replace(this.storagePrefix, ''))
             }
         }
     }
@@ -175,7 +179,7 @@ export class Mediator {
         //confirm tx
         await this.buildAndSend(sourceAccount, ops)
         //store the record in the localStorage
-        localStorage.setItem(storagePrefix + this.mediatorAddress, this.source)
+        localStorage.setItem(this.storagePrefix + this.mediatorAddress, this.source)
         //client will need mediator secret for trading
         return this.mediator.secret()
     }
@@ -228,7 +232,7 @@ export class Mediator {
         }
         await this.buildAndSend(account, ops)
         //remove reference from local storage
-        localStorage.removeItem(storagePrefix + address)
+        localStorage.removeItem(this.storagePrefix + address)
     }
 
     /**
