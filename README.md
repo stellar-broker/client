@@ -8,10 +8,12 @@ npm i @stellar-broker/client
 
 ## Usage
 
-### Example - connect and trade with StellarBroker
+### Interactive Sessions
 
-The client connects to the router server, keeps an open connection and constantly receives
-price quote updates from the server.
+Using an interactive session is the preferred way for the majority of integrations.
+A client connects to the router server and maintains the connection open, receiving price quote updates and other 
+notifications from the server without delays. Trading, retries, and results confirmations get processed in the
+background.
 
 ```js
 import StellarBrokerClient from '@stellar-broker/client'
@@ -78,10 +80,14 @@ client.quote({
 })
 
 //once the quote received from the server, we can confirm the quote
-async function signTx(tx) { //async signing callback - implement custom logic here
+async function signTx(payload) { //async signing callback - implement custom logic here
     const kp = Keypair.fromSecret('<account_secret>')
-    tx.sign(kp)
-    return tx
+    if (payload.sign) { //sign transaction
+        payload.sign(kp)
+        return payload
+    } 
+    //it's authorization payload
+    return kp.sign(payload)
 }
 client.confirmQuote('<account_address>', signTx) //provide trader account address
 
@@ -92,10 +98,10 @@ client.stop()
 client.close()
 ```
 
-### Example - Get swap estimate without trading
+### Swap Estimate
 
-Swap estimate may be handy in scenarios when the client has no intention to trade or receive price quote updates in
-streaming mode, and just wants to get a single price quote.
+Swap estimates may be handy in scenarios when a client has no intention to trade or receive price quote updates,
+and just wants to get a single price quote instead.
 
 ```js
 import {estimateSwap} from '@stellar-broker/client'
@@ -106,5 +112,50 @@ estimateSwap({
     sellingAmount: '1000', 
     slippageTolerance: 0.02 //2%
 })
+```
 
+### Delegated Signing and Multisig
+
+StellarBroker trading sessions rely on fast transactions signing in order to immediately react on market changes.
+In scenarios when a client app cannot sign transactions directly or requires multisig aggregation, it's still possible
+to utilize StellarBroker using a mediator account. 
+
+Mediator flow implies creation of a temporary auxiliary account that will hold tokens until the swap process is executed
+in full, then transfers all funds back to the source account and gets merged into it, releasing temporary blocked XLM
+funds.
+
+This package contains a reference implementation of such mediator account, but it's up to developers whether to use it
+directly or create alternative logic based on it.
+
+
+```js
+import {Mediator} from '@stellar-broker/client'
+
+const sellingAsset = 'XLM'
+const buyingAsset = 'AQUA-GBNZILSTVQZ4R7IKQDGHYGY2QXL5QOFJYQMXPKWRRM5PAV7Y4M67AQUA'
+const sellingAmount = '10'
+
+//once the quote received from the server, we can confirm the quote
+async function signTx(tx) { //async signing callback - implement custom logic here
+    const kp = Keypair.fromSecret('<account_secret>')
+    tx.sign(kp)
+    return tx
+}
+
+//fabric for meditor account creation
+const mediator = new Mediator(source, sellingAsset, buyingAsset, sellingAmount, signTx)
+
+//create new mediator account
+const mediatorSecret = await mediator.init()
+console.log('Created mediator account ' + Keypair.fromSecret(mediatorSecret).publicKey())
+
+//use it for trading, and dispose once finished -- all funds and XLM reserves will be returned to the source account
+await mediator.dispose()
+console.log('Mediator account disposed')
+
+//if the user left the session in the process or there were connection problems,
+//funds from previously created mediator accounts can be recovered like this
+if (mediator.hasObsoleteMediators) {
+    await mediator.disposeObsoleteMediators()
+}
 ```
