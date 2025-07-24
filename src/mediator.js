@@ -1,4 +1,4 @@
-import {Asset, Keypair, Memo, Operation, TransactionBuilder, Horizon, Networks, StrKey, TimeoutInfinite} from '@stellar/stellar-sdk'
+import {Asset, Keypair, Memo, Operation, TransactionBuilder, Horizon, Networks, StrKey, TimeoutInfinite, NotFoundError} from '@stellar/stellar-sdk'
 import {fromStroops, toStroops} from './stroops.js'
 import {convertToStellarAsset} from './asset.js'
 import {AuthorizationWrapper} from './authorization.js'
@@ -267,7 +267,7 @@ export class Mediator {
         //load account
         let mediatorAccount = await this.loadAccount(address)
         if (!mediatorAccount) {
-            //remove reference from local storage
+            //remove reference from local storage only if account doesn't exist on the ledger
             localStorage.removeItem(this.storagePrefix + address)
             throw new Error(`Mediator account ${address} doesn't exist on the ledger`)
         }
@@ -353,9 +353,14 @@ export class Mediator {
      */
     async loadAccount(address) {
         try {
-            return this.constructor.createHorizon().loadAccount(address)
+            return await this.constructor.createHorizon().loadAccount(address)
         } catch (e) {
+            if (e instanceof NotFoundError) {
+                console.warn(`Account ${address} doesn't exist on the ledger`)
+                return null
+            }
             console.error(e)
+            throw e
         }
     }
 

@@ -273,5 +273,5 @@ export class Mediator {
     /**
      * Dispose mediator account
      */
-    dispose(address: string): Promise<void>;
+    dispose(address?: string): Promise<void>;
 }
